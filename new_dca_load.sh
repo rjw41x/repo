@@ -51,8 +51,8 @@ do
         # 'gpfdist://v3_sdw3:8081/${table}.psv','gpfdist://v3_sdw3:8082/${table}.psv',
         # 'gpfdist://v3_sdw4:8081/${table}.psv','gpfdist://v3_sdw4:8082/${table}.psv')
         psql -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
-        sql_error /tmp/cr_ext.out
-        if [[ $? != 0 ]]; then
+        sql_error /tmp/cr_ext.out /tmp/cr_ext.sql 
+        if [[ $RET_VAL != 0 ]]; then
             message "FAIL: create external readable table ext.$table"
             # add the table to the redo log on failure
             redo_log $table 
@@ -64,8 +64,8 @@ do
         # LOAD FROM EXT TABLES
         echo "insert into ${schema}.${table} select * from ext.${table};" > /tmp/load_from_ext.sql
         psql -f /tmp/load_from_ext.sql > /tmp/load_from_ext.out 2>&1
-        sql_error /tmp/load_from_ext.out
-        if [[ $? == 0 ]]; then
+        sql_error /tmp/load_from_ext.out /tmp/load_from_ext.sql
+        if [[ $RET_VAL == 0 ]]; then
             echo ${schema}.${table} | paste - /tmp/load_from_ext.out >> $RESULTS
             clean_load_files ${schema}.${table}
             # remove the semaphore so we don't load it again

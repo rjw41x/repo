@@ -7,7 +7,7 @@ source master_conf.sh
 # RJW - may be a hardcoded list in production
 SCHEMAS=$(psql -t -c"select schema_name from information_schema.schemata where schema_name not in ( 'gp_toolkit', 'pg_toast', 'pg_bitmapindex', 'pg_aoseg', 'pg_catalog', 'information_schema', 'ext', 'public');" )
 LOGFILE=~/logs/unload.out
-REDO_LOG=~/logs/redo
+REDO_LOG=~/logs/unload_redo
 mv $REDO_LOG ~/logs/old_redo # save the old one in case we weren't done with it.
 > $REDO_LOG # initialize it
 
@@ -21,14 +21,6 @@ message() {
 }
 redo_log() {
     echo $* >> $REDO_LOG
-}
-sql_error() {
-    grep ERROR $1 > /dev/null 2>&1
-    if [[ $? != 0 ]]; then
-        return 0
-    else
-        return 1
-    fi
 }
 
 # MAIN
@@ -53,8 +45,8 @@ do
             # 'gpfdist://v3_sdw4:${WRITE_PORT1}/${table}.psv','gpfdist://v3_sdw4:${WRITE_PORT2}/${table}.psv')
             # create the table, trapping any errors
             psql -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
-            sql_error /tmp/cr_ext.out
-            if [[ $? != 0 ]]; then
+            sql_error /tmp/cr_ext.out /tmp/cr_ext.sql 
+            if [[ $RET_VAL != 0 ]]; then
                 message "FAIL: external table ext.$table"
                 # add the table to the redo log on failure
                 redo_log $table 
@@ -76,8 +68,8 @@ do
     do
         echo "insert into ext.$table select * from ${schema}.${table};" > /tmp/unload.sql
         psql -f /tmp/unload.sql > /tmp/unload.out 2>&1
-        sql_error /tmp/unload.out
-        if [[ $? == 0 ]]; then
+        sql_error /tmp/unload.out /tmp/unload.sql 
+        if [[ $RET_VAL == 0 ]]; then
             log "SUCCESS: table $table unload"
         else
             message "FAIL: table $table unload"

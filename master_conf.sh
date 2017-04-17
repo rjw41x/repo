@@ -12,7 +12,7 @@ export DB_SCHEMAS_FILE=${ARTIFACT_DIR}/db_schemas.sql
 export DATA_DIR1=/data/gpdata1/trans1  # /data1/transfer
 export DATA_DIR2=/data/gpdata2/trans2  # /data2/transfer
 # requires starting 2 gpfdist for writes on each V3 Segment server - 8081 (/data1), 8082 (/data2)
-# requires starting 2 gpfdist for reads on each V3 Segment server - 8081 (/data1), 8082 (/data2)
+# requires starting 2 gpfdist for reads on each V3 Segment server - 8088 (/data1), 8089 (/data2)
 # Ports that writable ext tables will use
 export WRITE_PORT1=8081
 export WRITE_PORT2=8082
@@ -21,14 +21,24 @@ export READ_PORT1=8088
 export READ_PORT2=8089
 # default location of gpfdist logs
 export GPFDLOGFILE=~/logs/gpfd.log
+
+# GPDB Connection Info
+export OLD_MASTER=192.168.177.131
+export NEW_MASTER=192.168.177.133
+OLD_PORT=5432
+NEW_PORT=5432
+
 # segment names (probably need IP's to make it work w/out DNS)
 # export NEW_SEGS="sdw1 sdw2 sdw3 sdw4"
-export NEW_SEGS="rjw1"
-export OLD_SEGS="sdw1 sdw2 sdw3 sdw4 sdw5 sdw6 sdw7 sdw8 sdw9 sdw10 sdw11 sdw12 sdw13 sdw14 sdw15 sdw16"
+export NEW_SEGS="rjw2"
+# export OLD_SEGS="sdw1 sdw2 sdw3 sdw4 sdw5 sdw6 sdw7 sdw8 sdw9 sdw10 sdw11 sdw12 sdw13 sdw14 sdw15 sdw16"
+export OLD_SEGS="rjw1"
 
+# return value for functions - clear it when sourced
+RET_VAL=""
 # FUNCTIONS
 log () {
-    echo $* >> $LOGFILE
+    echo "$*" >> "$LOGFILE"
 }
 message() {
     log $*
@@ -37,11 +47,17 @@ message() {
 redo_log() {
     echo $* >> $REDO_LOG
 }
+# $1 == output file, $2 == sql file name, $3 (opt) ABORT - force exit for sql errors
 sql_error() {
-    grep ERROR $1 > /dev/null 2>&1
-    if [[ $? != 0 ]]; then
-        return 0
+    SQL_ERR=$?
+    egrep 'ERROR|FATAL' $1 > /dev/null 2>&1
+    if [[ $? != 1 ]]; then
+        RET_VAL=1
+        message "error running sql $2"
+        if [[ ! -z "$3" ]]; then
+            exit $RET_VAL
+        fi
     else
-        return 1
+        RET_VAL=0
     fi
 }

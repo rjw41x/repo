@@ -57,14 +57,41 @@ start_gpfd() {
 stop_gpfd() {
     for host in $NEW_SEGS
     do
-        ssh gpadmin@$host "for proc in $(ps -ef | grep gpfdist | grep -v grep | awk '{ printf("%s ",$2);}'); do kill \$proc; done " > /dev/null 2>&1
-        num_gpfd=$(ssh gpadmin@rjw1 "echo $(ps -ef | grep gpfdist | grep -v grep | wc -l)")
+        # ssh gpadmin@$host "for proc in $(ps -ef 2> /dev/null | grep gpfdist | grep -v grep | awk '{ printf("%s ",$2);}'); do kill \$proc; done " > /dev/null 2>&1
+        ssh gpadmin@$host ps -ef 2> /dev/null | grep gpfdist | grep -v grep| awk '{ printf("%s ",$2);}' > /tmp/$$procs
+        for process in $(cat /tmp/$$procs)
+        do
+            ssh gpadmin@$host kill $process > /dev/null 2>&1
+        done
+        # num_gpfd=$(ssh gpadmin@$host "echo $(ps -ef 2> /dev/null | grep gpfdist | grep -v grep | wc -l)")
+        num_gpfd=$(ssh gpadmin@$host ps -ef 2> /dev/null | grep gpfdist | grep -v grep | wc -l)
         if [[ $num_gpfd == 0 ]]; then
             message "gpfdist processes on host $host have been killed"
         else
             message "Not all gpfdist shutdown on host $host"
         fi
     done
+}
+
+check() {
+    RET_VAL=""
+    tgt_gpfd=$( env | grep PORT | grep -v grep | wc -l)
+    num_segs=$(echo $NEW_SEGS | wc -w)
+    host_cnt=0
+    for host in $NEW_SEGS
+    do
+        num_gpfd=$(ssh gpadmin@$host ps -ef 2> /dev/null | grep gpfdist | grep -v grep | wc -l)
+        host_cnt=$((host_cnt+1))
+        if [[ $tgt_gpfd != $num_gpfd ]]; then
+            RET_VAL=1
+            message "incorrect number of gpfdist running on host $host, try manage_gpfdist.sh restart"
+            # subtract host when we end up here
+            host_cnt=$((host_cnt-1))
+        fi
+    done
+    if [[ $num_segs == $host_cnt ]]; then
+        message "gpfdist running correctly on all hosts"
+    fi
 }
 
 # make sure we are gpadmin
@@ -84,6 +111,15 @@ case $1 in
 
     "stop" )
         stop_gpfd
+    ;;
+
+    "check" )
+        check
+    ;;
+
+    "restart" )
+        stop_gpfd
+        start_gpfd
     ;;
 
     "make" )
