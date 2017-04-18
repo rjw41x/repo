@@ -5,12 +5,15 @@ source master_conf.sh
 
 # GLOBALS
 LOGFILE=~/logs/gpfdist_start.out
+RET_VAL=0
 
 # FUNCTIONS
 usage()  {
     echo "$0 start|stop|make"
     echo "    start = start gpdfdist processes
     stop = stop running gpfdist processes
+    restart = stop and start gpfdist processes
+    check/status = check gpfdist processes
     make = make data directories for the transfer process"
     exit 1
 }
@@ -91,6 +94,7 @@ check() {
     done
     if [[ $num_segs == $host_cnt ]]; then
         message "gpfdist running correctly on all hosts"
+        RET_VAL=0
     fi
 }
 
@@ -113,7 +117,7 @@ case $1 in
         stop_gpfd
     ;;
 
-    "check" )
+    "check"|"status" )
         check
     ;;
 
@@ -130,3 +134,4 @@ case $1 in
     usage
     ;;
 esac
+exit $RET_VAL

@@ -35,9 +35,24 @@ file_check() {
 clean_load_files() {
     for seg in $NEW_SEGS
     do
-        ssh $seg rm -f ${DATA_DIR1}/$1.$2.psv ${DATA_DIR2}/$1.$2.psv
+        # message "cleaning load files for $1 $2"
+        message "ssh $seg \"rm -f ${DATA_DIR1}/$1.$2.psv ${DATA_DIR2}/$1.$2.psv\""
+        ssh $seg "rm -f ${DATA_DIR1}/$1.$2.psv ${DATA_DIR2}/$1.$2.psv"
     done
 }
+
+# check to see that gpfdist procs are running
+./manage_gpfdist.sh check > /dev/null 2>&1
+if [[ $? != 0 ]]; then
+    # try to start them then check again
+    ./manage_gpfdist.sh start > /dev/null 2>&1
+    ./manage_gpfdist.sh check > /dev/null 2>&1
+    if [[ $? != 0 ]]; then
+        message "gpfdist processes are not running properly, restart failed, exiting"
+        exit 1
+    fi
+fi
+ 
 export PGHOST=$NEW_MASTER
 # psql -c "select count(*) from bball.appearances;" # debug to insure we are connecting to the right system ;-)
 # create schema ext ignore error if it exists
@@ -66,7 +81,7 @@ do
 
         psql -d $DB -c "drop external table if exists ext.${table};" > /dev/null 2>&1
         echo "create readable external table ext.$table ( like ${schema}.${table} )
-        location ('gpfdist://${NEW_SEGS}:${READ_PORT1}/${table}.psv','gpfdist://${NEW_SEGS}:${READ_PORT2}/${table}.psv' )
+        location ('gpfdist://${NEW_SEGS}:${READ_PORT1}/${schema}.${table}.psv','gpfdist://${NEW_SEGS}:${READ_PORT2}/${schema}.${table}.psv' )
         format 'text' ( delimiter '|' null ''  );" > /tmp/cr_ext.sql
         # RJW - Need to account for multiple seg servers
         # location ('gpfdist://v3_sdw1:8081/${table}.psv','gpfdist://v3_sdw1:8082/${table}.psv',
@@ -87,19 +102,20 @@ do
         # LOAD FROM EXT TABLES
         echo "insert into ${schema}.${table} select * from ext.${table};" > /tmp/load_from_ext.sql
         psql -d $DB -f /tmp/load_from_ext.sql > /tmp/load_from_ext.out 2>&1
-
         sql_error /tmp/load_from_ext.out /tmp/load_from_ext.sql
         if [[ $RET_VAL == 0 ]]; then
-            echo ${schema}.${table} | paste - /tmp/load_from_ext.out >> $RESULTS
-            egrep 'INSERT|COPY' /tmp/load_from_ext.out >> $RESULTS
-            clean_load_files ${schema}.${table}
+            echo ${schema}.${table} $(egrep 'INSERT|COPY' /tmp/load_from_ext.out) >> $RESULTS
+            clean_load_files ${schema} ${table}
             message "SUCCESS: ${schema}.${table} loaded"
             # remove the semaphore so we don't load it again
             rm $fil
         else
             # capture the schema and table in the redo log
+            # RJW - just for grins - REMOVE for production
+            clean_load_files ${schema} ${table}
             redo_log ${schema}.${table}
             message "FAIL: ${schema}.${table} on load "
+            rm $fil
         fi
     done
 done

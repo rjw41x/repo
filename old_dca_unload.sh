@@ -33,6 +33,17 @@ SCHEMAS=$(psql -t -c "select schema_name from information_schema.schemata where 
 # create schema ext ignore error if it exists
 psql -d $DB -c "create schema ext;" > /dev/null 2>&1
 
+# check to see that gpfdist procs are running
+./manage_gpfdist.sh check > /dev/null 2>&1
+if [[ $? != 0 ]]; then
+    ./manage_gpfdist.sh start > /dev/null 2>&1
+    ./manage_gpfdist.sh check > /dev/null 2>&1
+    if [[ $? != 0 ]]; then
+        message "gpfdist processes are not running properly, restart failed, exiting"
+        exit 1
+    fi
+fi
+
 # MAIN
 for schema in $SCHEMAS
 do
@@ -47,7 +58,7 @@ do
             # echo "  $table"
             psql -d $DB -c "drop external table if exists ext.${table};" > /dev/null 2>&1
             echo "create writable external table ext.$table ( like ${schema}.${table} )
-            location ('gpfdist://${NEW_SEGS}:${WRITE_PORT1}/${table}.psv','gpfdist://${NEW_SEGS}:${WRITE_PORT2}/${table}.psv' )
+            location ('gpfdist://${NEW_SEGS}:${WRITE_PORT1}/${schema}.${table}.psv','gpfdist://${NEW_SEGS}:${WRITE_PORT2}/${schema}.${table}.psv' )
             format 'text' ( delimiter '|' null ''  );" > /tmp/cr_ext.sql
             # RJW - need to account for multiple ext table hosts based on NEW_SEGMENTs
             # location ('gpfdist://v3_sdw1:${WRITE_PORT1}/${table}.psv','gpfdist://v3_sdw1:${WRITE_PORT2}/${table}.psv',
@@ -69,7 +80,7 @@ do
             # do we want to do anything else in this script?
         done
         # clean up between schemas
-        rm /tmp/cr_ext.sql /tmp/cr_ext.out
+        rm /tmp/cr_ext.sql /tmp/cr_ext.out > /dev/null 2>&1
 
     # end if SKIP_EXT
     fi
@@ -77,6 +88,12 @@ do
     # UNLOAD TO EXT TABLES
     for table in $TABLES
     do
+        rows=$(psql -t -c "SELECT reltuples::BIGINT AS estimate FROM pg_class WHERE oid='${schema}.${table}'::regclass;")
+        if [[ $rows == 0 ]]; then
+            message "Table ${schema}.${table} appears to be empty, skipping.  Validate"
+            redo_log ${schema}.${table}
+            continue
+        fi
         echo "insert into ext.$table select * from ${schema}.${table};" > /tmp/unload.sql
         psql -d $DB -f /tmp/unload.sql > /tmp/unload.out 2>&1
         sql_error /tmp/unload.out /tmp/unload.sql 
@@ -88,12 +105,12 @@ do
         fi
         # build func to set remote semaphore
         # for now set local semaphore
-        touch /tmp/${schema}.${table}.rdy
+        echo $rows > /tmp/${schema}.${table}.rdy
         # exit 1
     done
 
     # clean up
-    rm /tmp/unload.sql /tmp/unload.out
+    rm /tmp/unload.sql /tmp/unload.out > /dev/null 2>&1
 
     # clear variable
     TABLES=""
