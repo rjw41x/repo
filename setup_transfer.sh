@@ -49,7 +49,7 @@ fi
 
 # get schemas, tables - including ownership - and all other non-globabl db objects - by schema
 # iterate over schemas
-SCHEMAS=$(psql -A -t -c "select schema_name from information_schema.schemata where schema_name not in ( 'gp_toolkit', 'pg_toast', 'pg_bitmapindex', 'pg_aoseg', 'pg_catalog', 'information_schema');" )
+SCHEMAS=$(psql -A -t -c "select schema_name from information_schema.schemata where schema_name not in ( 'gp_toolkit', 'pg_toast', 'pg_bitmapindex', 'pg_aoseg', 'pg_catalog', 'information_schema', 'ext' );" ) # skip system schemas
 for schema in $SCHEMAS
 do
     message "dumping schema for $DB: pg_dump -s -n $schema $DB  $ARTIFACT_DIR/${DB}.${schema}.ddl"

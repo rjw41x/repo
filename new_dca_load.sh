@@ -1,34 +1,54 @@
 #!/bin/bash
 
-# master variables
-source master_conf.sh
+usage () {
+    cat << EOF
+    usage:  $0 database_name
+EOF
+exit 1
+}
+# check args
+if [[ $# != 1 ]]; then
+    usage
+else
+    DB=$1
+fi
 
 # GLOBALS
 LOGFILE=~/logs/load.out
-RESULTS=~/load/results.out
+RESULTS=~/logs/results.out
 REDO_LOG=~/logs/load_redo
-mv $REDO_LOG ~/logs/old_load_redo # save the old one in case we weren't done with it.
+mv $REDO_LOG ~/logs/old_load_redo > /dev/null 2>&1 # save the old one in case we weren't done with it.
 > $REDO_LOG # initialize it
+
+# master variables
+source master_conf.sh
 
 # FUNCTIONS
 file_check() {
     ls /tmp/*.rdy > /dev/null 2>&1
-    if [[ $? == 0 ]]; then
+    if [[ $? != 0 ]]; then
         return 1
     else
         return 0
     fi
 }
 clean_load_files() {
-    for seg in $SEGMENTS
+    for seg in $NEW_SEGS
     do
         ssh $seg rm -f ${DATA_DIR1}/$1.$2.psv ${DATA_DIR2}/$1.$2.psv
     done
 }
+export PGHOST=$NEW_MASTER
+# psql -c "select count(*) from bball.appearances;" # debug to insure we are connecting to the right system ;-)
+# create schema ext ignore error if it exists
+psql -d $DB -c "create schema ext;" > /dev/null 2>&1
 
 # MAIN LOOP - wait for file semaphores to appear
 while [[ 1 ]]
 do
+    if [[ -e /tmp/complete ]]; then
+        break
+    fi
     ls /tmp/*.rdy > /dev/null 2>&1
     if [[ $? != 0 ]]; then
         # wait for files
@@ -40,17 +60,20 @@ do
     for fil in /tmp/*.rdy
     do
         # CREATE EXT TABLES
-        schema=$(echo $fil | awk -F"." '{ print $1 }')
-        table=$(echo $fil | awk -F"." '{ print $2 }')
-        psql -c "drop external table if exists ext.${table};" > /dev/null 2>&1
+        schema=$(echo $fil | awk -F"/" '{ x=split($3,sch,"."); printf("%s", sch[1] ); }')
+        table=$(echo $fil | awk -F"/" '{ x=split($3,tbl,"."); printf("%s", tbl[2] ); }')
+        message "processing schema -${schema}- table -${table}-"
+
+        psql -d $DB -c "drop external table if exists ext.${table};" > /dev/null 2>&1
         echo "create readable external table ext.$table ( like ${schema}.${table} )
-        location ('gpfdist://rjw1:${READ_PORT1}/${table}.psv','gpfdist://rjw1:${READ_PORT2}/${table}.psv' )
+        location ('gpfdist://${NEW_SEGS}:${READ_PORT1}/${table}.psv','gpfdist://${NEW_SEGS}:${READ_PORT2}/${table}.psv' )
         format 'text' ( delimiter '|' null ''  );" > /tmp/cr_ext.sql
+        # RJW - Need to account for multiple seg servers
         # location ('gpfdist://v3_sdw1:8081/${table}.psv','gpfdist://v3_sdw1:8082/${table}.psv',
         # 'gpfdist://v3_sdw2:8081/${table}.psv','gpfdist://v3_sdw2:8082/${table}.psv',
         # 'gpfdist://v3_sdw3:8081/${table}.psv','gpfdist://v3_sdw3:8082/${table}.psv',
         # 'gpfdist://v3_sdw4:8081/${table}.psv','gpfdist://v3_sdw4:8082/${table}.psv')
-        psql -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
+        psql -d $DB -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
         sql_error /tmp/cr_ext.out /tmp/cr_ext.sql 
         if [[ $RET_VAL != 0 ]]; then
             message "FAIL: create external readable table ext.$table"
@@ -63,17 +86,22 @@ do
 
         # LOAD FROM EXT TABLES
         echo "insert into ${schema}.${table} select * from ext.${table};" > /tmp/load_from_ext.sql
-        psql -f /tmp/load_from_ext.sql > /tmp/load_from_ext.out 2>&1
+        psql -d $DB -f /tmp/load_from_ext.sql > /tmp/load_from_ext.out 2>&1
+
         sql_error /tmp/load_from_ext.out /tmp/load_from_ext.sql
         if [[ $RET_VAL == 0 ]]; then
             echo ${schema}.${table} | paste - /tmp/load_from_ext.out >> $RESULTS
+            egrep 'INSERT|COPY' /tmp/load_from_ext.out >> $RESULTS
             clean_load_files ${schema}.${table}
+            message "SUCCESS: ${schema}.${table} loaded"
             # remove the semaphore so we don't load it again
             rm $fil
         else
             # capture the schema and table in the redo log
             redo_log ${schema}.${table}
-            message "FAIL: load of ${schema}.${table}"
+            message "FAIL: ${schema}.${table} on load "
         fi
     done
 done
+
+echo $0 complete

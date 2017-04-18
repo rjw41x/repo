@@ -1,33 +1,43 @@
 #!/bin/bash
 
-# get project control information
-source master_conf.sh
+usage () {
+    cat << EOF
+    usage:  $0 database_name
+EOF
+exit 1
+}
+# check args
+if [[ $# != 1 ]]; then
+    usage
+else
+    DB=$1
+fi
 
 # GLOBALS
 # RJW - may be a hardcoded list in production
-SCHEMAS=$(psql -t -c"select schema_name from information_schema.schemata where schema_name not in ( 'gp_toolkit', 'pg_toast', 'pg_bitmapindex', 'pg_aoseg', 'pg_catalog', 'information_schema', 'ext', 'public');" )
 LOGFILE=~/logs/unload.out
 REDO_LOG=~/logs/unload_redo
 mv $REDO_LOG ~/logs/old_redo # save the old one in case we weren't done with it.
 > $REDO_LOG # initialize it
 
-# FUNCTIONS
-log () {
-    echo $* >> $LOGFILE
-}
-message() {
-    log $*
-    echo $*
-}
-redo_log() {
-    echo $* >> $REDO_LOG
-}
+
+# get project control information - have to source after setting local variables ;-)
+source master_conf.sh
+
+# set host to old system
+export PGHOST=$OLD_MASTER
+
+# get list of schemas
+SCHEMAS=$(psql -t -c "select schema_name from information_schema.schemata where schema_name not in ( 'gp_toolkit', 'pg_toast', 'pg_bitmapindex', 'pg_aoseg', 'pg_catalog', 'information_schema', 'ext');" )
+
+# create schema ext ignore error if it exists
+psql -d $DB -c "create schema ext;" > /dev/null 2>&1
 
 # MAIN
 for schema in $SCHEMAS
 do
-    log "processing schema $schema"
-	TABLES=$(psql -t -c "select table_name from information_schema.tables where table_schema = '$schema';")
+    message "processing schema $schema"
+	TABLES=$(psql -d $DB -t -c "select table_name from information_schema.tables where table_schema = '$schema';")
 
     if [[ -z "$SKIP_EXT" ]]; then
         # CREATE EXT TABLES
@@ -35,16 +45,17 @@ do
         do
             # debug
             # echo "  $table"
-            psql -c "drop external table if exists ext.${table};" > /dev/null 2>&1
+            psql -d $DB -c "drop external table if exists ext.${table};" > /dev/null 2>&1
             echo "create writable external table ext.$table ( like ${schema}.${table} )
-            location ('gpfdist://rjw1:${WRITE_PORT1}/${table}.psv','gpfdist://rjw1:${WRITE_PORT2}/${table}.psv' )
+            location ('gpfdist://${NEW_SEGS}:${WRITE_PORT1}/${table}.psv','gpfdist://${NEW_SEGS}:${WRITE_PORT2}/${table}.psv' )
             format 'text' ( delimiter '|' null ''  );" > /tmp/cr_ext.sql
+            # RJW - need to account for multiple ext table hosts based on NEW_SEGMENTs
             # location ('gpfdist://v3_sdw1:${WRITE_PORT1}/${table}.psv','gpfdist://v3_sdw1:${WRITE_PORT2}/${table}.psv',
             # 'gpfdist://v3_sdw2:${WRITE_PORT1}/${table}.psv','gpfdist://v3_sdw2:${WRITE_PORT2}/${table}.psv',
             # 'gpfdist://v3_sdw3:${WRITE_PORT1}/${table}.psv','gpfdist://v3_sdw3:${WRITE_PORT2}/${table}.psv',
             # 'gpfdist://v3_sdw4:${WRITE_PORT1}/${table}.psv','gpfdist://v3_sdw4:${WRITE_PORT2}/${table}.psv')
             # create the table, trapping any errors
-            psql -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
+            psql -d $DB -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
             sql_error /tmp/cr_ext.out /tmp/cr_ext.sql 
             if [[ $RET_VAL != 0 ]]; then
                 message "FAIL: external table ext.$table"
@@ -67,7 +78,7 @@ do
     for table in $TABLES
     do
         echo "insert into ext.$table select * from ${schema}.${table};" > /tmp/unload.sql
-        psql -f /tmp/unload.sql > /tmp/unload.out 2>&1
+        psql -d $DB -f /tmp/unload.sql > /tmp/unload.out 2>&1
         sql_error /tmp/unload.out /tmp/unload.sql 
         if [[ $RET_VAL == 0 ]]; then
             log "SUCCESS: table $table unload"
@@ -78,7 +89,7 @@ do
         # build func to set remote semaphore
         # for now set local semaphore
         touch /tmp/${schema}.${table}.rdy
-        exit 1
+        # exit 1
     done
 
     # clean up
