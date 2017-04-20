@@ -41,6 +41,7 @@ clean_load_files() {
     done
 }
 
+message $(date) $0 start
 # check to see that gpfdist procs are running
 ./manage_gpfdist.sh check > /dev/null 2>&1
 if [[ $? != 0 ]]; then
@@ -71,8 +72,8 @@ do
         # continue with next iteration of loop
         continue
     fi
-    # else we have a file or more so process them
-    for fil in /tmp/*.rdy
+    # else we have a file or more so process them in the order they arrive
+    for fil in $(ls -1ct /tmp/*.rdy)
     do
         # CREATE EXT TABLES
         schema=$(echo $fil | awk -F"/" '{ x=split($3,sch,"."); printf("%s", sch[1] ); }')
@@ -81,19 +82,24 @@ do
 
         psql -d $DB -c "drop external table if exists ext.${table};" > /dev/null 2>&1
         echo "create readable external table ext.$table ( like ${schema}.${table} )
-        location ('gpfdist://${NEW_SEGS}:${READ_PORT1}/${schema}.${table}.psv','gpfdist://${NEW_SEGS}:${READ_PORT2}/${schema}.${table}.psv' )
-        format 'text' ( delimiter '|' null ''  );" > /tmp/cr_ext.sql
-        # RJW - Need to account for multiple seg servers
-        # location ('gpfdist://v3_sdw1:8081/${table}.psv','gpfdist://v3_sdw1:8082/${table}.psv',
-        # 'gpfdist://v3_sdw2:8081/${table}.psv','gpfdist://v3_sdw2:8082/${table}.psv',
-        # 'gpfdist://v3_sdw3:8081/${table}.psv','gpfdist://v3_sdw3:8082/${table}.psv',
-        # 'gpfdist://v3_sdw4:8081/${table}.psv','gpfdist://v3_sdw4:8082/${table}.psv')
+        location (" > /tmp/cr_ext.sql
+        cnt=0
+        num_segs=$(echo $NEW_SEGS | wc -w)
+        for seg in $NEW_SEGS
+        do
+            cnt=$((cnt+1))
+            if [[ $num_segs == $cnt ]]; then
+                echo "'gpfdist://${seg}:${READ_PORT1}/${schema}.${table}.psv','gpfdist://${seg}:${READ_PORT2}/${schema}.${table}.psv'"  >> /tmp/cr_ext.sql
+            else
+                echo "'gpfdist://${seg}:${READ_PORT1}/${schema}.${table}.psv','gpfdist://${seg}:${READ_PORT2}/${schema}.${table}.psv',"  >> /tmp/cr_ext.sql
+            fi
+        echo ") format 'text' ( delimiter '|' null ''  );" >> /tmp/cr_ext.sql
         psql -d $DB -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
         sql_error /tmp/cr_ext.out /tmp/cr_ext.sql 
         if [[ $RET_VAL != 0 ]]; then
             message "FAIL: create external readable table ext.$table"
             # add the table to the redo log on failure
-            redo_log $table 
+            redo_log ${schema}.${table} ext table failed 
             continue # goto next table
         else
             log "SUCCESS: external readable table ext.$table"
@@ -111,13 +117,11 @@ do
             rm $fil
         else
             # capture the schema and table in the redo log
-            # RJW - just for grins - REMOVE for production
-            clean_load_files ${schema} ${table}
-            redo_log ${schema}.${table}
+            redo_log ${schema}.${table} load failed
             message "FAIL: ${schema}.${table} on load "
             rm $fil
         fi
     done
 done
 
-echo $0 complete
+message $(date) $0 complete

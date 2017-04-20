@@ -33,8 +33,10 @@ make_dirs() {
         ssh gpadmin@$host "mkdir $DATA_DIR1 $DATA_DIR2"
         if [[ $? != 0 ]]; then
             message "FAIL: directory create $DATA_DIR1 $DATA_DIR2"
+            exit 1
         else
             message "SUCCESS: directory create $DATA_DIR1 $DATA_DIR2"
+            RET_VAL=0
         fi
     done
 }
@@ -43,18 +45,25 @@ start_gpfd() {
     do
         # gpfdist for writable ext tables
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh ; gpfdist -d $DATA_DIR1 -p $WRITE_PORT1 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        check_status $? writable1
+        # check_status $? writable1
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh; gpfdist -d $DATA_DIR2 -p $WRITE_PORT2 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        check_status $? writable2
+        # check_status $? writable2
         # gpfdist for readable ext tables
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh; gpfdist -d $DATA_DIR1 -p $READ_PORT1 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        check_status $? readable1
+        # check_status $? readable1
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh; gpfdist -d $DATA_DIR2 -p $READ_PORT2 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        check_status $? readable2
+        # check_status $? readable2
     done
 
-    # made it to here so all is good
-    message "gpdfist processes started successfully"
+    check
+    if [[ $RET_VAL == 0 ]]; then
+        # made it to here so all is good
+        message "SUCCESS: gpdfist processes started "
+        RET_VAL=0
+    else
+        message "FAIL:  gpdfist processes did not start properly "
+        RET_VAL=1
+    fi
 }
 
 stop_gpfd() {
@@ -70,8 +79,10 @@ stop_gpfd() {
         num_gpfd=$(ssh gpadmin@$host ps -ef 2> /dev/null | grep gpfdist | grep -v grep | wc -l)
         if [[ $num_gpfd == 0 ]]; then
             message "gpfdist processes on host $host have been killed"
+            RET_VAL=0
         else
             message "Not all gpfdist shutdown on host $host"
+            RET_VAL=1
         fi
     done
 }
