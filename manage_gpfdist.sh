@@ -1,4 +1,6 @@
 #!/bin/bash
+# DEBUG
+# set -x
 
 # pull in master config information
 source master_conf.sh
@@ -40,6 +42,29 @@ make_dirs() {
         fi
     done
 }
+
+check() {
+    RET_VAL=""
+    tgt_gpfd=$( grep 'PORT[1-2]' master_conf.sh | grep -v grep | wc -l)
+    num_segs=$(echo $NEW_SEGS | wc -w)
+    host_cnt=0
+    for host in $NEW_SEGS
+    do
+        num_gpfd=$(ssh gpadmin@$host ps -ef 2> /dev/null | grep gpfdist | grep -v grep | wc -l)
+        host_cnt=$((host_cnt+1))
+        if [[ $tgt_gpfd != $num_gpfd ]]; then
+            RET_VAL=1
+            message "incorrect number of gpfdist running on host $host, try manage_gpfdist.sh restart"
+            # subtract host when we end up here
+            host_cnt=$((host_cnt-1))
+        fi
+    done
+    if [[ $num_segs == $host_cnt ]]; then
+        message "gpfdist running correctly on all hosts"
+        RET_VAL=0
+    fi
+}
+
 start_gpfd() {
     for host in $NEW_SEGS
     do
@@ -55,15 +80,15 @@ start_gpfd() {
         # check_status $? readable2
     done
 
-    check
-    if [[ $RET_VAL == 0 ]]; then
-        # made it to here so all is good
-        message "SUCCESS: gpdfist processes started "
-        RET_VAL=0
-    else
-        message "FAIL:  gpdfist processes did not start properly "
-        RET_VAL=1
-    fi
+     check
+     if [[ $RET_VAL == 0 ]]; then
+         # made it to here so all is good
+         message "SUCCESS: gpdfist processes started "
+         RET_VAL=0
+     else
+         message "FAIL:  gpdfist processes did not start properly "
+         RET_VAL=1
+     fi
 }
 
 stop_gpfd() {
@@ -85,29 +110,9 @@ stop_gpfd() {
             RET_VAL=1
         fi
     done
+    rm /tmp/$$procs
 }
 
-check() {
-    RET_VAL=""
-    tgt_gpfd=$( env | grep PORT | grep -v grep | wc -l)
-    num_segs=$(echo $NEW_SEGS | wc -w)
-    host_cnt=0
-    for host in $NEW_SEGS
-    do
-        num_gpfd=$(ssh gpadmin@$host ps -ef 2> /dev/null | grep gpfdist | grep -v grep | wc -l)
-        host_cnt=$((host_cnt+1))
-        if [[ $tgt_gpfd != $num_gpfd ]]; then
-            RET_VAL=1
-            message "incorrect number of gpfdist running on host $host, try manage_gpfdist.sh restart"
-            # subtract host when we end up here
-            host_cnt=$((host_cnt-1))
-        fi
-    done
-    if [[ $num_segs == $host_cnt ]]; then
-        message "gpfdist running correctly on all hosts"
-        RET_VAL=0
-    fi
-}
 
 # make sure we are gpadmin
 if [[ $USER != "gpadmin" ]]; then

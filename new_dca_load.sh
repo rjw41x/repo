@@ -55,6 +55,7 @@ if [[ $? != 0 ]]; then
 fi
  
 export PGHOST=$NEW_MASTER
+export PGPORT=$NEW_PORT
 # psql -c "select count(*) from bball.appearances;" # debug to insure we are connecting to the right system ;-)
 # create schema ext ignore error if it exists
 psql -d $DB -c "create schema ext;" > /dev/null 2>&1
@@ -63,10 +64,12 @@ psql -d $DB -c "create schema ext;" > /dev/null 2>&1
 while [[ 1 ]]
 do
     if [[ -e /tmp/complete ]]; then
+        message "complete file found, exiting"
         break
     fi
     ls /tmp/*.rdy > /dev/null 2>&1
     if [[ $? != 0 ]]; then
+	echo waiting for files
         # wait for files
         sleep 5
         # continue with next iteration of loop
@@ -81,8 +84,7 @@ do
         message "processing schema -${schema}- table -${table}-"
 
         psql -d $DB -c "drop external table if exists ext.${table};" > /dev/null 2>&1
-        echo "create readable external table ext.$table ( like ${schema}.${table} )
-        location (" > /tmp/cr_ext.sql
+        echo "create readable external table ext.$table ( like ${schema}.${table} ) location (" > /tmp/cr_ext.sql
         cnt=0
         num_segs=$(echo $NEW_SEGS | wc -w)
         for seg in $NEW_SEGS
@@ -93,6 +95,7 @@ do
             else
                 echo "'gpfdist://${seg}:${READ_PORT1}/${schema}.${table}.psv','gpfdist://${seg}:${READ_PORT2}/${schema}.${table}.psv',"  >> /tmp/cr_ext.sql
             fi
+        done
         echo ") format 'text' ( delimiter '|' null ''  );" >> /tmp/cr_ext.sql
         psql -d $DB -f /tmp/cr_ext.sql > /tmp/cr_ext.out 2>&1 
         sql_error /tmp/cr_ext.out /tmp/cr_ext.sql 

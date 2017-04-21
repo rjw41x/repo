@@ -20,10 +20,10 @@ REDO_LOG=~/logs/unload_redo
 mv $REDO_LOG ~/logs/old_redo # save the old one in case we weren't done with it.
 > $REDO_LOG # initialize it
 
-message $(date) $0 start
 # get project control information - have to source after setting local variables ;-)
 source master_conf.sh
 
+message $(date) $0 start
 # set host to old system
 export PGHOST=$OLD_MASTER
 
@@ -44,8 +44,7 @@ do
         exit 1
     fi
     message "processing schema $schema"
-	TABLES=$(psql -d $DB -t -c "select table_name from information_schema.tables where table_schema = '$schema';")
-
+    TABLES=$(psql -d $DB -t -c "select table_name from information_schema.tables where table_schema = '$schema';")
     if [[ -z "$SKIP_EXT" ]]; then
         # CREATE EXT TABLES
         for table in $TABLES
