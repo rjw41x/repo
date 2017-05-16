@@ -19,14 +19,6 @@ usage()  {
     make = make data directories for the transfer process"
     exit 1
 }
-check_status() {
-    if [[ $1 == 0 ]]; then
-        return 0
-    else
-        message "failed to start gpfdist $2, aborting.  Check logs $LOGFILE"
-        exit 1
-    fi
-}
 
 # make transfer directories
 make_dirs() {
@@ -70,16 +62,17 @@ start_gpfd() {
     do
         # gpfdist for writable ext tables
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh ; gpfdist -d $DATA_DIR1 -p $WRITE_PORT1 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        # check_status $? writable1
+sleep 1
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh; gpfdist -d $DATA_DIR2 -p $WRITE_PORT2 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        # check_status $? writable2
+sleep 1
         # gpfdist for readable ext tables
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh; gpfdist -d $DATA_DIR1 -p $READ_PORT1 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        # check_status $? readable1
+sleep 1
         ssh gpadmin@$host "source /usr/local/greenplum-db/greenplum_path.sh; gpfdist -d $DATA_DIR2 -p $READ_PORT2 -l $GPFDLOGFILE &" >> $LOGFILE 2>&1 &
-        # check_status $? readable2
+sleep 2
     done
 
+     sleep 2
      check
      if [[ $RET_VAL == 0 ]]; then
          # made it to here so all is good
